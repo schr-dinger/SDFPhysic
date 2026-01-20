@@ -636,7 +636,6 @@ void USch_SDFComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    //debug Render
     if (DebugSDFRender)
     {
         FVector size = Sdf.LocalBounds.GetSize();
@@ -652,11 +651,7 @@ void USch_SDFComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
         DebugDrawGradients(8, 10, DeltaTime);
     }
 
-
-    //Basic Physics
-
     if (UsePhysicManager) return;
-
 
     const double now = GetWorld()->GetTimeSeconds();
     const bool wasOnFloor = bIsOnFloor;
@@ -667,143 +662,48 @@ void USch_SDFComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
         GEngine->AddOnScreenDebugMessage(-1, DeltaTime, FColor::Green, TEXT("IsOnFloor!"));
     }
 
-    /*
-    if (bGroundLocked)
-    {
-        // 락 걸린 프레임은 접지로 간주 + 유지 연장
-        bIsOnFloor = true;
-        FloorNormal = GroundLockNormal;
-        FloorHoldUntil = now + FloorHoldTime;
-    }
-    else
-    {
-        // 최근에 접지였으면 잠깐 유지(깜빡임 방지)
-        if (bIsOnFloor)
-        {
-            const FVector N = FloorNormal.GetSafeNormal();
-            const float   vnUp = FVector::DotProduct(Velocity, N); // +면 위로 이탈
-            const bool breakUp = (vnUp > GroundBreakSpeed);
-            if (breakUp)
-                bIsOnFloor = false;   // 유지 종료
-            // else: 유지
-        }
-        else
-        {
-            bIsOnFloor = false;
-
-            FVector accel = ApplyGravity();
-
-            Velocity += accel * DeltaTime;
-
-        }
-    }
-    */
     if (CanMove)
     {
         FVector Location = GetOwner()->GetActorLocation() + Velocity * DeltaTime;
         GetOwner()->SetActorLocation(Location);
-    }
 
-    //GroundLockTest
-
-    if (bGroundLockEnabled)
-    {
-        //if (!bGroundLocked)
-            //TryAcquireGroundLock(GroundSnapDistance);
-        //else
-            //MaintainGroundLock(DeltaTime);
-    }
-
-    //rotation
-    if (CanMove)
-    {
-        /*@@@2
         const float wlen = AngularVelocity.Size();
-
-        const FVector axis = AngularVelocity / wlen;
-        const FQuat dq(axis, wlen * DeltaTime); // rad
-        FQuat rot = GetOwner()->GetActorQuat();
-        rot = dq * rot;
-        rot.Normalize();
-        GetOwner()->SetActorRotation(rot);
-         */
+        if (wlen > KINDA_SMALL_NUMBER)
+        {
+            const FVector axis = AngularVelocity / wlen;
+            const FQuat dq(axis, wlen * DeltaTime);
+            FQuat rot = GetOwner()->GetActorQuat();
+            rot = (dq * rot).GetNormalized();
+            GetOwner()->SetActorRotation(rot);
+        }
     }
 
-    //Collision
+    //if (bGroundLockEnabled)
+    //{
+    //}
+
     for (int32 i = 0; i < GSchSdfRegistry.Num(); i++)
     {
         USch_SDFComponent* Other = GSchSdfRegistry[i].Get();
 
         if (!Other || Other == this) continue;
 
-        //Cluster 충돌 무시
         if (GetClusterRoot() == Other->GetClusterRoot())
         {
             continue;
         }
 
-        FVector CP, N, J; float SD = 0.f;
+        FVector CP, N; float SD = 0.f;
 
         const bool bHit = CheckCollision(Other, CP, N, SD, 50);
-        //const bool bHit = CheckCollision_QueryOnly(Other, CP, N, SD);
 
         if(bHit)
         {
-            //ProcessImpact(Other, CP, N, SD, DeltaTime, J);
-            //ProcessImpactAngular(Other, CP, N, SD, DeltaTime,J);
-
-            FVector  Jt;
-            ProcessImpact_CapsuleLike(Other, CP, N, SD, DeltaTime, 0.2f, 0.6f, 0.4f, 5.0f, J, Jt);
-
-
-
-            //Clustering 시도
             if (bClusterOn && Other->bClusterOn)
             {
                 TryCluster(Other, CP);
             }
         }
-    }
-
-    //rotation
-
-    if (CanMove)
-    {
-        
-        // 1) 현재 L_body → ω 갱신 (기존 헬퍼)
-        SyncLFromAngular();
-
-        const FQuat   R = GetOwner()->GetActorQuat();
-        const FVector Tau_body = R.UnrotateVector(AccumTorqueWorld);
-        FVector Omega_body = R.UnrotateVector(AngularVelocity);
-        // I·ω (바디 프레임 대각 성분 활용)
-
-
-        const FVector Iw(
-            InertiaTensorLocal.X * Omega_body.X,
-            InertiaTensorLocal.Y * Omega_body.Y,
-            InertiaTensorLocal.Z * Omega_body.Z
-        );
-        // Euler's equations: L̇_body = τ_body − ω_body × L_body  (L_body = I·ω)
-        FVector Ldot = Tau_body - FVector::CrossProduct(Omega_body, Iw);
-
-        // 3) 각운동량 업데이트(세미-암시적)
-        L_body += Ldot * DeltaTime;
-
-        SyncAngularFromL();  // AngularVelocity(=ω_world) 재동기화
-
-        const float wlen = AngularVelocity.Size();
-        if (wlen > KINDA_SMALL_NUMBER)
-        {
-            const FVector axis = AngularVelocity / wlen;
-            const FQuat dq(axis, wlen * DeltaTime);  // 각도 = |ω|·dt (라디안)
-            FQuat rot = GetOwner()->GetActorQuat();
-            rot = dq * rot;
-            rot.Normalize();
-            GetOwner()->SetActorRotation(rot);
-        }
-
-        AccumTorqueWorld = FVector::ZeroVector;   
     }
 
     if (bIsOnFloor) SolveContactVelocity(Velocity, FloorNormal, DeltaTime);
@@ -1089,17 +989,16 @@ bool USch_SDFComponent::CheckCollision(USch_SDFComponent* Other, FVector& OutCon
             OutNormal = -x;
             OutSignedDistance = dA;
 
+            UE_LOG(LogTemp, Warning, TEXT("[CheckCollision] %s vs %s | dA=%.2f dB=%.2f | CP=%s N=%s"),
+                *GetOwner()->GetName(), *Other->GetOwner()->GetName(), dA, dB,
+                *OutContactPoint.ToString(), *OutNormal.ToString());
+
             if (Other->IsFloor)
             {
                 bIsOnFloor = true;
                 FloorNormal = OutNormal;
                 LastFloor = Other;
                 FloorHoldUntil = GetWorld()->GetTimeSeconds() + FloorHoldTime;
-            }
-
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 0.1f, FColor::Green, TEXT("Hit!"));
             }
 
             if (dA < 0.f)
@@ -1110,10 +1009,11 @@ bool USch_SDFComponent::CheckCollision(USch_SDFComponent* Other, FVector& OutCon
                 if (CanMove)
                 {
                     GetOwner()->AddActorWorldOffset(OutNormal * corr);
+                    UE_LOG(LogTemp, Log, TEXT("  [Correction] %s moved by %.2f"), *GetOwner()->GetName(), corr);
                 }
 
-                float vn_now = FVector::DotProduct(Velocity, OutNormal);
-                if (vn_now < 0.f) Velocity -= vn_now * OutNormal;
+                // float vn_now = FVector::DotProduct(Velocity, OutNormal);
+                // if (vn_now < 0.f) Velocity -= vn_now * OutNormal;
             }
 
             return true;
@@ -1447,40 +1347,6 @@ int32 USch_SDFComponent::IndexFromWorld(FVector WorldPos)
 
 bool USch_SDFComponent::ProcessImpact(USch_SDFComponent* Other, FVector& ContactPoint, FVector& Normal_WS, float SignedDistance, float DeltaTime, FVector& OutJ)
 {
-    /*
-    if (!Other) return false;
-
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 0.1f, FColor::Green, TEXT("ProcessImpact!"));
-    }
-
-    float mA = Mass;
-    float mB = Other->Mass;
-
-    FVector VelocityA = Velocity;
-    FVector VelocityB = Other->Velocity;
-
-    const FVector vRel = VelocityA - VelocityB;
-    const float   vn = FVector::DotProduct(vRel, Normal_WS); // (>0 분리중, <0 접근중)
-
-    if (vn >= 0.f) return false;
-
-    const float e = 0.7f;
-    //const float e = (Other->IsFloor || IsFloor) ? 0.0f : 0.7f;
-    const float j = -(1.0f + e) * vn / (1/mA + 1/mB);
-    const FVector Impulse = j * Normal_WS;
-
-    OutJ = Impulse;
-
-    Velocity = VelocityA + (Impulse / mA);
-
-    Other->Velocity = VelocityB - (Impulse / mB);
-
-
-    return true;
-    */
-    //@@@3
     if (!Other) return false;
     USch_SDFComponent* A = GetClusterRoot();
     USch_SDFComponent* B = Other->GetClusterRoot();
@@ -1499,6 +1365,7 @@ bool USch_SDFComponent::ProcessImpact(USch_SDFComponent* Other, FVector& Contact
     if (vn >= 0.f) return false;
 
     auto IinvDot = [](USch_SDFComponent* C, const FVector& w)->float {
+        if (!C->CanMove) return 0.f;  // 정적 객체는 회전 불가
         const FQuat R = C->GetOwner()->GetActorQuat();
         const FVector wL = R.UnrotateVector(w);
         const FVector Mw(C->InvInertiaTensorLocal.X * wL.X,
@@ -1506,10 +1373,10 @@ bool USch_SDFComponent::ProcessImpact(USch_SDFComponent* Other, FVector& Contact
             C->InvInertiaTensorLocal.Z * wL.Z);
         const FVector wr = R.RotateVector(Mw);
         return FVector::DotProduct(w, wr);
-        };
+    };
 
-    const float invMA = 1.f / FMath::Max(A->Mass, KINDA_SMALL_NUMBER);
-    const float invMB = 1.f / FMath::Max(B->Mass, KINDA_SMALL_NUMBER);
+    const float invMA = A->CanMove ? (1.f / FMath::Max(A->Mass, KINDA_SMALL_NUMBER)) : 0.f;
+    const float invMB = B->CanMove ? (1.f / FMath::Max(B->Mass, KINDA_SMALL_NUMBER)) : 0.f;
     const FVector rnA = FVector::CrossProduct(rA, n);
     const FVector rnB = FVector::CrossProduct(rB, n);
 
@@ -1517,7 +1384,6 @@ bool USch_SDFComponent::ProcessImpact(USch_SDFComponent* Other, FVector& Contact
     const float eBase = 0.6f;
     const float vStop = 80.f, vFull = 250.f;
     const float vIn = -vn;
-    //float e = (vIn <= vStop) ? 0.f : (vIn >= vFull ? eBase : eBase * FMath::Square((vIn - vStop) / (vFull - vStop)));
     float e;
     if (!Other->IsFloor) 
     {
@@ -1533,14 +1399,17 @@ bool USch_SDFComponent::ProcessImpact(USch_SDFComponent* Other, FVector& Contact
     const FVector J = j * n;
     OutJ = J;
 
-    if (GEngine)
-    {
-        //UE_LOG(LogTemp, Warning, TEXT("[SchImpact Original] post jn=%.6f n=(%.3f, %.3f, %.3f)"), j, n.X, n.Y, n.Z);
-    }
-
+    UE_LOG(LogTemp, Warning, TEXT("[ProcessImpact] %s vs %s | IsFloor=%d vIn=%.1f vn=%.1f e=%.2f j=%.1f | J=%s"),
+        *A->GetOwner()->GetName(), *B->GetOwner()->GetName(),
+        Other->IsFloor ? 1 : 0, vIn, vn, e, j, *J.ToString());
 
     A->ApplyImpulseAtWorldPoint(J, ContactPoint);
     B->ApplyImpulseAtWorldPoint(-J, ContactPoint);
+    
+    UE_LOG(LogTemp, Log, TEXT("  [AfterImpact] %s Vel=%s | %s Vel=%s"),
+        *A->GetOwner()->GetName(), *A->Velocity.ToString(),
+        *B->GetOwner()->GetName(), *B->Velocity.ToString());
+    
     return true;
 }
 
@@ -1567,49 +1436,28 @@ bool USch_SDFComponent::ProcessImpactAngular(USch_SDFComponent* Other,
 
 void USch_SDFComponent::ApplyImpulseAtWorldPoint(FVector Impulse, FVector WorldPoint)
 {
-    /*@@@Test
-    //Clustering 부모로 넘기기
     if (!bIsClusterRoot && ClusterParent.IsValid())
     {
         ClusterParent->ApplyImpulseAtWorldPoint(Impulse, WorldPoint);
         return;
     }
 
-    Velocity += Impulse / Mass;
-
-    FVector r = WorldPoint - GetOwner()->GetActorLocation();
-    FVector rxJ = FVector::CrossProduct(r, Impulse);
-
-    FQuat   R = GetOwner()->GetActorQuat();
-    FVector rxJ_L = R.UnrotateVector(rxJ);  // 월드→바디
-    FVector ang_L(InvInertiaTensorLocal.X * rxJ_L.X,InvInertiaTensorLocal.Y * rxJ_L.Y,InvInertiaTensorLocal.Z * rxJ_L.Z);
-
-    FVector ang_W = R.RotateVector(ang_L);  // 바디→월드
-
-
-    AngularVelocity += ang_W/100.0f;    //언리얼 단위가 cm 젠장
-
-    if (GEngine)
+    // CanMove가 false면 임펄스를 무시 (정적 객체)
+    if (!CanMove)
     {
-        //FString S = FString::Printf(TEXT("[AngularVelocity] x=%.3f  y=%.3f  z=%.3f"), AngularVelocity[0], AngularVelocity[1], AngularVelocity[2]);
-        //GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, S);
+        return;
     }
-    */
-    if (!bIsClusterRoot && ClusterParent.IsValid()) { ClusterParent->ApplyImpulseAtWorldPoint(Impulse, WorldPoint); return; }
 
-    // 선형
     const float m = FMath::Max(Mass, KINDA_SMALL_NUMBER);
     Velocity += Impulse / m;
 
-    //각운동량은 COM 기준으로 갱신 (world → body)
-    const FVector comW = GetComWorld();                   // NEW
-    const FVector r = WorldPoint - comW;               // ★ COM 기준
+    const FVector comW = GetComWorld();
+    const FVector r = WorldPoint - comW;
     const FVector dL_w = FVector::CrossProduct(r, Impulse);
 
     const FQuat R = GetOwner()->GetActorQuat();
-    L_body += R.UnrotateVector(dL_w);                     // ★ L_body 누적
+    L_body += R.UnrotateVector(dL_w);
 
-    // ω/AngularVelocity 동기화
     SyncAngularFromL();
 }
 
@@ -1925,290 +1773,4 @@ void USch_SDFComponent::ReleaseGroundLock()
     GroundLockFloor.Reset();
 }
 
-//@@@CapsuleLikeTest
-void USch_SDFComponent::ApplyImpulseAtPoint_CapsuleLike(const FVector& J, const FVector& C)
-{
-    if (!CanMove) return;
-
-    //if (!bIsClusterRoot && ClusterParent.IsValid())
-    //{
-    //    ClusterParent->ApplyImpulseAtPoint_CapsuleLike(J, C);
-    //   return;
-    //}
-
-    // 선형
-    const float invM = (Mass > KINDA_SMALL_NUMBER) ? 1.f / Mass : 0.f;
-    Velocity += invM * J ;
-
-    // 각(월드 역관성 사용) — 캡슐 컴포넌트와 동일한 스타일
-    const FVector comW = GetComWorld();         // COM 기준 레버암
-    const FVector r = C - comW;
-    AngularVelocity += WorldInvInertiaMul_CapsuleLike(FVector::CrossProduct(r, J));
-
-    // 서로 다른 경로 간 일관성: L_body 동기화
-    SyncLFromAngular();
-}
-
-bool USch_SDFComponent::ProcessImpact_CapsuleLike(USch_SDFComponent* Other, const FVector& ContactPoint, const FVector& Normal_WS, float SignedDistance, float DeltaTime, float Restitution, float MuStatic, float MuDynamic, float BounceThreshold, FVector& OutJn, FVector& OutJt)
-{
-    if (!Other) return false;
-
-    USch_SDFComponent* A = this;
-    USch_SDFComponent* B = Other;
-
-    FVector n = Normal_WS.GetSafeNormal();
-    if (n.IsNearlyZero()) return false;
-
-
-    const float invMA = (A->CanMove && A->Mass > KINDA_SMALL_NUMBER) ? 1.f / A->Mass : 0.f;
-    const float invMB = (B->CanMove && B->Mass > KINDA_SMALL_NUMBER) ? 1.f / B->Mass : 0.f;
-
-    const FVector comA = A->GetComWorld();
-    const FVector comB = B->GetComWorld();
-    const FVector rA = ContactPoint - comA;
-    const FVector rB = ContactPoint - comB;
-
-    const FVector AB = comB - comA;
-    if (FVector::DotProduct(n, AB) < 0.f) n = -n;
-
-    // 상대속도(접촉점)
-    auto pointVel = [](USch_SDFComponent* C, const FVector& r)
-        {
-            return C->Velocity + FVector::CrossProduct(C->AngularVelocity, r);
-        };
-
-    FVector vRel = pointVel(A, rA) - pointVel(B, rB);
-
-
-    //법선 임펄스
-    const float vRelN = FVector::DotProduct(vRel, n);
-    if (vRelN >= 0.f) return false;
-
-    const FVector rAxn = FVector::CrossProduct(rA, n);
-    const FVector rBxn = FVector::CrossProduct(rB, n);
-
-    float Dn = 0.f;
-    if (A->CanMove)
-    {
-        Dn += invMA
-            + FVector::DotProduct(n, FVector::CrossProduct(A->WorldInvInertiaMul_CapsuleLike(rAxn), rA));
-    }
-    if (B->CanMove)
-    {
-        Dn += invMB
-            + FVector::DotProduct(n, FVector::CrossProduct(B->WorldInvInertiaMul_CapsuleLike(rBxn), rB));
-    }
-    Dn = FMath::Max(Dn, KINDA_SMALL_NUMBER);
-
-
-
-    float jn = 0.f;
-
-    //@@@ChatGPT ★ 이번 스텝 안에 '실제 충격'이 발생하는지(TOI) 추정
-    const bool bPenetrating = (SignedDistance < 0.f);
-    float toi = TNumericLimits<float>::Max();
-    if (!bPenetrating && vRelN < 0.f)
-    {
-        const float closing = -vRelN; // cm/s
-        toi = SignedDistance / FMath::Max(closing, KINDA_SMALL_NUMBER); // s
-    }
-    const bool bWillHitThisStep = (toi <= DeltaTime + 1e-5f);
-    
-    // ★ 반발은 '첫 충격 프레임'이나 '이미 침투'일 때만 적용
-    const bool bDoBounce = (-vRelN > BounceThreshold) && (bPenetrating || bWillHitThisStep);
-    const float eUse = bDoBounce ? Restitution : 0.f;
-    
-    // ★ 침투 중엔 소량의 바움가르테 bias (속도 레벨 보정)
-    float bias = 0.f;
-    if (bPenetrating)
-    {
-        const float Beta = 0.2f;   // 0.1~0.3 권장
-        const float Slop = 0.5f;   // cm, 작은 양수
-        bias = (Beta / FMath::Max(DeltaTime, KINDA_SMALL_NUMBER))
-             *FMath::Max(-SignedDistance - Slop, 0.f);
-    }
-   
-            // 목표 Δv_n :  -e*vRelN  (비탄성은 e=0)  +  bias
-    float deltaVn = (-(1.f + eUse) * vRelN) + bias;       // Δv_n = jn * Dn
-    jn = deltaVn / Dn;
-    
-           // ★ 지속 접촉(비반발)에서만 Δv_n 상한 (폭주 방지)
-    if (!bDoBounce)
-    {
-        const float MaxDeltaVn_Contact = 3000.f; // cm/s, 프로젝트에 맞게 튜닝
-        if (deltaVn > MaxDeltaVn_Contact)
-             jn = MaxDeltaVn_Contact / Dn;
-    }
-   
-    jn = FMath::Max(0.f, jn);
-
-    const float vRelN0 = vRelN;
-
-// 1) 법선 임펄스 Jn 계산 및 적용 (기존 로직 유지)
-
-jn = FMath::Max(0.f, jn);
-const FVector Jn = jn * n;
-//if (A->CanMove) A->ApplyImpulseAtPoint_CapsuleLike( Jn, ContactPoint);
-//if (B->CanMove) B->ApplyImpulseAtPoint_CapsuleLike(-Jn, ContactPoint);
-
-if (A->CanMove) A->ApplyImpulseAtWorldPoint(Jn, ContactPoint);
-if (B->CanMove) B->ApplyImpulseAtWorldPoint(-Jn, ContactPoint);
-
-
-// 2) 마찰 계산 전, 최신 vRel 재계산
-
-FVector vRel1 = pointVel(A, rA) - pointVel(B, rB);
-
-// 3) 접선(마찰) 임펄스 — Dt는 '움직이는 바디만' 포함 권장
-const FVector vt1 = vRel1 - FVector::DotProduct(vRel1, n) * n;
-const float   vtLen1 = vt1.Size();
-FVector Jt = FVector::ZeroVector;
-if (vtLen1 > KINDA_SMALL_NUMBER)
-{
-    const FVector t = vt1 / vtLen1;
-    const FVector rAxt = FVector::CrossProduct(rA, t);
-    const FVector rBxt = FVector::CrossProduct(rB, t);
-
-    float Dt = 0.f;  // ★ 움직이는 쪽만
-    if (A->CanMove)
-        Dt += invMA + FVector::DotProduct(t, FVector::CrossProduct(A->WorldInvInertiaMul_CapsuleLike(rAxt), rA));
-    if (B->CanMove)
-        Dt += invMB + FVector::DotProduct(t, FVector::CrossProduct(B->WorldInvInertiaMul_CapsuleLike(rBxt), rB));
-    Dt = FMath::Max(Dt, KINDA_SMALL_NUMBER);
-
-    float jt = -(FVector::DotProduct(vRel1, t)) / Dt;
-
-    // (선택) 반발 프레임에서는 마찰 축소/비활성
-    const float muS = bDoBounce ? 0.0f : MuStatic;   // ★ 반발 프레임엔 정지마찰 off
-    const float muD = bDoBounce ? (MuDynamic * 0.25f) : MuDynamic; // ★ 동마찰 약화
-
-    const float jtStaticMax  = muS * jn;
-    const float jtDynamicMax = muD * jn;
-    if (FMath::Abs(jt) <= jtStaticMax) {
-        // 정지 마찰로 제동
-    } else {
-        jt = FMath::Clamp(jt, -jtDynamicMax, jtDynamicMax);
-    }
-
-    Jt = jt * t;
-    //if (A->CanMove) A->ApplyImpulseAtPoint_CapsuleLike( Jt, ContactPoint);
-    //if (B->CanMove) B->ApplyImpulseAtPoint_CapsuleLike(-Jt, ContactPoint);
-    //if (A->CanMove) A->ApplyImpulseAtWorldPoint(Jn, ContactPoint);
-    //if (B->CanMove) B->ApplyImpulseAtWorldPoint(-Jn, ContactPoint);
-
-}
-
-// 4) ★★ 반발/접촉 '목표 법선 속도'로 재고정 (post-fix)
-FVector vRel2 = pointVel(A, rA) - pointVel(B, rB);
-const float vRelN2 = FVector::DotProduct(vRel2, n);
-
-// 목표값: 반발이면 -e*vRelN0(>0), 아니면 0
-const float vRelN_target = bDoBounce ? (-eUse * vRelN0) : 0.f;
-float corr = vRelN_target - vRelN2;
-if (corr > 0.f) {
-    const float jn_corr = corr / Dn;
-    const FVector Jn_corr = jn_corr * n;
-    //if (A->CanMove) A->ApplyImpulseAtPoint_CapsuleLike( Jn_corr, ContactPoint);
-    //if (B->CanMove) B->ApplyImpulseAtPoint_CapsuleLike(-Jn_corr, ContactPoint);
-    //if (A->CanMove) A->ApplyImpulseAtWorldPoint(Jn, ContactPoint);
-    //if (B->CanMove) B->ApplyImpulseAtWorldPoint(-Jn, ContactPoint);
-}
-
-// (디버그)
-
-OutJn = Jn + Jt.ProjectOnTo(n); // (로그/디버그용; 실제로는 Jn, Jt를 따로 내보내도 OK)
-OutJt = Jt;
-return true;
-
-
-
-
-    //@@@ChatGPT
-
-    /*
-    const FVector Jn = jn * n ;
-    OutJn = Jn;
-
-    if (GEngine)
-    {
-        //UE_LOG(LogTemp, Warning, TEXT("[SchImpact] post jn=%.6f n=(%.3f, %.3f, %.3f)"), jn, n.X, n.Y, n.Z);
-        //UE_LOG(LogTemp, Warning,TEXT("[Imp] vRelN=%.6g  Dn=%.6g  invMassSum=%.6g  jn=%.6g"),vRelN, Dn, invMA + invMB, jn);
-        UE_LOG(LogTemp, Warning,TEXT("[BounceChk] d=%.3f vRelN=%.3f toi=%.4f willHit=%d doBounce=%d jn=%.3f"),SignedDistance, vRelN, toi, bWillHitThisStep ? 1 : 0, bDoBounce ? 1 : 0, jn);
-    }
-
-
-
-    // 적용 (뉴턴 3법칙)
-    if (A->CanMove)A->ApplyImpulseAtPoint_CapsuleLike(Jn, ContactPoint);
-    if (B->CanMove)B->ApplyImpulseAtPoint_CapsuleLike(-Jn, ContactPoint);
-
-    // --------- [마찰(접선) 임펄스] ---------
-    //@@@NewvRel = pointVel(A, rA) - pointVel(B, rB);
-    vRel = pointVel(A, rA) - pointVel(B, rB);
-
-    const FVector vt = vRel - FVector::DotProduct(vRel, n) * n;
-    const float vtLen = vt.Size();
-
-    FVector Jt = FVector::ZeroVector;
-    if (vtLen > KINDA_SMALL_NUMBER)
-    {
-        const FVector t = vt / vtLen;
-
-        const FVector rAxt = FVector::CrossProduct(rA, t);
-        const FVector rBxt = FVector::CrossProduct(rB, t);
-
-        float Dt =
-            invMA + invMB
-            + FVector::DotProduct(t, FVector::CrossProduct(A->WorldInvInertiaMul_CapsuleLike(rAxt), rA))
-            + FVector::DotProduct(t, FVector::CrossProduct(B->WorldInvInertiaMul_CapsuleLike(rBxt), rB));
-        Dt = FMath::Max(Dt, KINDA_SMALL_NUMBER);
-
-        // 후보 접선 임펄스
-        float jt = -(FVector::DotProduct(vRel, t)) / Dt;
-
-        // 정지/동마찰 콘 클램프
-        const float jtStaticMax = MuStatic * jn;
-        if (FMath::Abs(jt) <= jtStaticMax)
-        {
-            // 정지 마찰로 완전 제동 가능
-        }
-        else
-        {
-            const float jtDynamicMax = MuDynamic * jn;
-            jt = FMath::Clamp(jt, -jtDynamicMax, jtDynamicMax);
-        }
-
-        Jt = jt * t;
-
-        // 적용
-        A->ApplyImpulseAtPoint_CapsuleLike(Jt, ContactPoint);
-        B->ApplyImpulseAtPoint_CapsuleLike(-Jt, ContactPoint);
-    }
-
-    OutJt = Jt;
-    return true;
-    */
-}
-
-FVector USch_SDFComponent::WorldInvInertiaMul_CapsuleLike(const FVector& v) const
-{
-    const FQuat R = GetOwner()->GetActorQuat();
-    // world -> body
-    FVector vL = R.UnrotateVector(v);
-    // 로컬 대각 역관성 적용
-
-    if (bLockRotX) vL.X = 0.f;
-    if (bLockRotY) vL.Y = 0.f;
-    if (bLockRotZ) vL.Z = 0.f;
-
-    const FVector wL(
-        InvInertiaTensorLocal.X * vL.X,
-        InvInertiaTensorLocal.Y * vL.Y,
-        InvInertiaTensorLocal.Z * vL.Z
-    );
-
-
-    // body -> world
-    return R.RotateVector(wL);
-}
 

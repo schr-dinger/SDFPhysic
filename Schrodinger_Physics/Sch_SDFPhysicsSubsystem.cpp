@@ -65,7 +65,6 @@ void USch_SDFPhysicsSubsystem::Unregister(USch_SDFComponent* C)
 
 void USch_SDFPhysicsSubsystem::Step(float dt)
 {
-    //속도 부분
     for (int32 i = 0; i < GSchSdfRegistry.Num(); ++i)
     {
         USch_SDFComponent* C = GSchSdfRegistry[i].Get();
@@ -79,19 +78,27 @@ void USch_SDFPhysicsSubsystem::Step(float dt)
 
     SolvePairs(Pairs, dt);
 
-
-    //위치 부분
     for (int32 i = 0; i < GSchSdfRegistry.Num(); ++i)
     {
         USch_SDFComponent* C = GSchSdfRegistry[i].Get();
-        if (!C) continue;
-        //C->TransformIntergrate(dt);
-        if (C->CanMove)
+        if (!C || !C->CanMove) continue;
+
+        AActor* Owner = C->GetOwner();
+        if (!Owner) continue;
+
+        FVector x1 = Owner->GetActorLocation() + C->Velocity * dt;
+        Owner->SetActorLocation(x1);
+
+        const float w = C->AngularVelocity.Size();
+        if (w > KINDA_SMALL_NUMBER)
         {
-            FVector Location = C->GetOwner()->GetActorLocation() + C->Velocity * dt;
-            C->GetOwner()->SetActorLocation(Location);
+            const FVector axis = C->AngularVelocity / w;
+            const FQuat dq(axis, w * dt);
+            FQuat q1 = (dq * Owner->GetActorQuat()).GetNormalized();
+            Owner->SetActorRotation(q1);
         }
 
+        C->SyncLFromAngular();
     }
 }
 
@@ -134,6 +141,8 @@ void USch_SDFPhysicsSubsystem::SolvePairs(const TArray<TPair<USch_SDFComponent*,
 {
     const int32 Iters = SolverIterations;
 
+    UE_LOG(LogTemp, Log, TEXT("[SolvePairs] Processing %d pairs, %d iterations"), pairs.Num(), Iters);
+
     for (int32 it = 0; it < Iters; ++it)
     {
         const int32 M = pairs.Num();
@@ -143,93 +152,42 @@ void USch_SDFPhysicsSubsystem::SolvePairs(const TArray<TPair<USch_SDFComponent*,
             USch_SDFComponent* B = pairs[p].Value;
             if (!A || !B) continue;
 
-            // 정적-정적은 스킵
             if (!(A->CanMove || B->CanMove)) continue;
 
             FVector CP(0, 0, 0);
             FVector N(0, 0, 1);
             float   d = 1e9f;
 
-            //const bool hit = A->CheckCollision_QueryOnly(B, CP, N, d);
             const bool hit = A->CheckCollision(B, CP, N, d);
 
             if (!hit) continue;
 
-            //const FVector AB = B->GetOwner()->GetActorLocation() - A->GetOwner()->GetActorLocation(); // 방향 고정
-            //if (FVector::DotProduct(N, AB) < 0.f) N = -N;
+            UE_LOG(LogTemp, Log, TEXT("  [Pair %d] %s vs %s | d=%.2f"),
+                p, *A->GetOwner()->GetName(), *B->GetOwner()->GetName(), d);
 
-            //@@@ChatGPT
-            //const FVector comA = A->CenterOfMassLocal;
-            //const FVector comB = B->CenterOfMassLocal;
-            const FVector comA = A->GetOwner()->GetActorLocation();
-            const FVector comB = B->GetOwner()->GetActorLocation();
+            const FVector comA = A->GetComWorld();
+            const FVector comB = B->GetComWorld();
             const FVector rA = CP - comA;
             const FVector rB = CP - comB;
+            
             auto PointVel = [](USch_SDFComponent* C, const FVector& r) {
                 return C->Velocity + FVector::CrossProduct(C->AngularVelocity, r);
-                };
+            };
 
             const float vRelN = FVector::DotProduct(PointVel(A, rA) - PointVel(B, rB), N);
-            const float closing = FMath::Max(0.f, -vRelN) * dt; // cm
+            const float closing = FMath::Max(0.f, -vRelN) * dt;
             const float slop = SpeculativeContactSlop + closing;
             
             if (d <= slop)
             {
-
                 if (A->CanMove && d < 0)
                 {
                     FVector Location = A->GetOwner()->GetActorLocation() - N * d;
-                    //A->GetOwner()->SetActorLocation(Location);
                 }
-
-                //FVector Jn, Jt;
-                //A->ProcessImpact_CapsuleLike(B, CP, N, d, dt, 0.9f, 0.6f, 0.4f, 5.0f, Jn, Jt);
-
 
                 FVector Jn(0, 0, 0);
                 A->ProcessImpact(B, CP, N, d, (float)dt, Jn);
-
-
-     
-
-
-
-                if (GEngine)
-                {
-                    //UE_LOG(LogTemp, Warning, TEXT("Debug Check jn = % .6f n = (% .3f, % .3f, % .3f)"), Jn.Size(), N.X, N.Y, N.Z);
-                    //UE_LOG(LogTemp, Warning, TEXT("Debug Check V.size = % .6f v = (% .3f, % .3f, % .3f)"), A->Velocity.Size(), A->Velocity.X, A->Velocity.Y, A->Velocity.Z);
-                    
-                }
-
             }
-
-
-
-
-
-            // 스펙 컨택트: 곧 닿을 거리도 접촉으로 취급
-            //if (d <= SpeculativeContactSlop)
-            {
-                // 탄성/마찰 포함을 네 ProcessImpact에서 처리한다고 가정
-
-                //@@@CapsuleLikeTest
-                //FVector OutJ(0, 0, 0);
-                //A->ProcessImpact(B, CP, N, d, (float)dt, OutJ);
-
-                //FVector Jn, Jt;
-                //A->ProcessImpact_CapsuleLike(B, CP, N, d, dt, 0.2f, 0.6f, 0.4f, 5.0f, Jn, Jt);
-
-
-                // A->ProcessImpactAngular(B, CP, N, d, (float)dt);
-
-                //접지/마찰 별도
-                // A->SolveContactVelocity(N, (float)dt);
-                // B->SolveContactVelocity(-N,(float)dt);
-            }
-
-            // (선택) 침투가 이미 발생(d<0)했을 때 바움가르테 보정량을
-            // 속도 레벨로 흘릴 수도 있고, PositionIntegrate 이전의 별도 위치 보정 단계에서
-            // pos += beta * (-d) * N 로 소량 밀어낼 수도 있어.
         }
     }
 }

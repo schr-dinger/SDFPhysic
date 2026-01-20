@@ -88,9 +88,12 @@ protected:
     float SampleSdfLocal_Nearest(const FVector& LocalPos) const;
     FVector GetGradient(FVector& LocalP);
 
+public:
     FVector GetComWorld();
     void   SyncAngularFromL();
     void   SyncLFromAngular();
+
+protected:
 
     //Basic Physics
 
@@ -273,31 +276,6 @@ public:
 
     UPROPERTY(EditAnywhere)
     bool UsePhysicManager = true;
-
-
-    //@@@CapsuleLikeTest
-    UFUNCTION()
-    void ApplyImpulseAtPoint_CapsuleLike(const FVector& J, const FVector& C);
-
-    UFUNCTION()
-    bool ProcessImpact_CapsuleLike(
-        USch_SDFComponent* Other,
-        const FVector& ContactPoint,
-        const FVector& Normal_WS,
-        float SignedDistance,
-        float DeltaTime,
-        float Restitution,
-        float MuStatic,
-        float MuDynamic,
-        float BounceThreshold,
-        FVector& OutJn,   // 법선 임펄스(벡터)
-        FVector& OutJt    // 접선(마찰) 임펄스(벡터)
-    );
-
-
-    FVector WorldInvInertiaMul_CapsuleLike(const FVector& v) const;
-
-
 };
 
 FVector BaryClamp(const FVector& P, const FVector& A, const FVector& B, const FVector& C, FVector& OutClosest);
